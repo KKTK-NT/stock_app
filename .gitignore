@@ -1,0 +1,7 @@
+.venv
+.env
+*.txt
+chromedriver.exe
+*.pyc
+__pycache__
+.pytest_cache

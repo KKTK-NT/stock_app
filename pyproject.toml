@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "stock-trade"
+version = "0.1.0"
+description = ""
+authors = ["KKTK-NT <rodin198730@gmail.com>"]
+readme = "README.md"
+packages = [{include = "stock_trade"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+yfinance = "^0.2.17"
+streamlit = "^1.21.0"
+pandas = "<2.0"
+plotly = "^5.14.1"
+selenium = "^4.8.3"
+python-dotenv = "^1.0.0"
+pytest = "^7.3.1"
+bs4 = "^0.0.1"
+ipykernel = "^6.22.0"
+scikit-learn = "^1.2.2"
+lightgbm = "^3.3.5"
+nbformat = "^5.8.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
