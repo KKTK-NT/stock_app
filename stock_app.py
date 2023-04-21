@@ -60,6 +60,40 @@ def display_charts(data, symbols, interval):
 
         st.plotly_chart(fig)
 
+def display_prediction(target_symbols, predictions, actuals, future_predictions):
+    # クロスバリデーションのもっともよかったモデルの予測と実績の対比と、
+    # 一週間分の将来予測を時系列グラフにして表示
+    for target_symbol in target_symbols:
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(x=actuals[target_symbol].index,
+                                y=actuals[target_symbol]['actual'],
+                                mode='lines',
+                                name='Actual',
+                                line=dict(color='black')))
+        fig.add_trace(go.Scatter(x=predictions[target_symbol].index,
+                                y=predictions[target_symbol]['prediction'],
+                                mode='lines',
+                                name='Predicted',
+                                line=dict(color='red', dash='3px,2px', width=1.4)))
+
+        # Add future predictions to the plot
+        future_dates = future_predictions[target_symbol].index
+        fig.add_trace(go.Scatter(x=future_dates,
+                                y=future_predictions[target_symbol]['prediction'],
+                                mode='lines',
+                                name='Forecasted',
+                                line=dict(color='green', dash='3px,2px', width=1.4)))
+
+        fig.update_layout(title=f"{target_symbol} Predictions vs Actuals vs Forecasted",
+                        xaxis_title="Date",
+                        yaxis_title="Close Price")
+
+        fig.update_layout(title=f"{target_symbol} Predictions vs Actuals vs Forecasted",
+                        xaxis_title="Date",
+                        yaxis_title="Close Price")
+        st.plotly_chart(fig)
+            
 stock_table, asset, balance = cached_data()
 
 # ページのリスト
@@ -75,9 +109,8 @@ page = st.sidebar.radio("ページを選択", pages)
 if page == "保有銘柄情報":
     st.title("保有銘柄情報")
 
-    # スクレイピングが初回と「Update」ボタン押下時のみになるように修正
     update_button = False
-    update_button = st.button("Update")
+    update_button = st.button("情報更新")
 
     if stock_table is None:
         # キャッシュされたデータを取得
@@ -93,8 +126,7 @@ if page == "保有銘柄情報":
     # サイドバーから「保有銘柄情報」ページトップのコンテンツに移動
     interval_mapping = {
         'Daily': '1d',
-        '1 Hour': '1h',
-        '1 Minute': '1m',
+        '1 Hour': '1h'
     }
     
     st.header("Settings")
@@ -123,53 +155,25 @@ if page == "保有銘柄情報":
         # キャッシュをクリアして、再度スクレイピングを行う
         st.cache_data.clear()
         stock_table, asset, balance = cached_data()
+        st.experimental_rerun()
 
 # アルゴリズムトレードページ
 elif page == "アルゴリズムトレード":
     st.title("アルゴリズムトレード")
     
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=5*365)
+    years = 5 # 学習データの期間
     shift = 1 # n 期先予測
 
+    symbols = get_symbol_list("feat_symbols.txt")
+    target_symbols = get_symbol_list("target_symbols.txt")
+
+    predictions, actuals, future_predictions = algo_trade(symbols, target_symbols, years, shift)
+
     start_cal = st.button("計算開始")
+
+    display_prediction(target_symbols, predictions, actuals, future_predictions)
+
     if start_cal:
-
-        # ここにアルゴリズムトレードに関連するコードを追加
-        symbols = get_symbol_list("feat_symbols.txt")
-        target_symbols = get_symbol_list("target_symbols.txt")
-
-        predictions, actuals, future_predictions = algo_trade(symbols, target_symbols, start_date, end_date, shift)
-
-        # クロスバリデーションのもっともよかったモデルの予測と実績の対比と、
-        # 一週間分の将来予測を時系列グラフにして表示
-        for target_symbol in target_symbols:
-            fig = go.Figure()
-
-            fig.add_trace(go.Scatter(x=actuals[target_symbol].index,
-                                    y=actuals[target_symbol]['actual'],
-                                    mode='lines',
-                                    name='Actual',
-                                    line=dict(color='black')))
-            fig.add_trace(go.Scatter(x=predictions[target_symbol].index,
-                                    y=predictions[target_symbol]['prediction'],
-                                    mode='lines',
-                                    name='Predicted',
-                                    line=dict(color='red', dash='3px,2px', width=1.4)))
-
-            # Add future predictions to the plot
-            future_dates = future_predictions[target_symbol].index
-            fig.add_trace(go.Scatter(x=future_dates,
-                                    y=future_predictions[target_symbol]['prediction'],
-                                    mode='lines',
-                                    name='Forecasted',
-                                    line=dict(color='green', dash='3px,2px', width=1.4)))
-
-            fig.update_layout(title=f"{target_symbol} Predictions vs Actuals vs Forecasted",
-                            xaxis_title="Date",
-                            yaxis_title="Close Price")
-
-            fig.update_layout(title=f"{target_symbol} Predictions vs Actuals vs Forecasted",
-                            xaxis_title="Date",
-                            yaxis_title="Close Price")
-            st.plotly_chart(fig)
+        st.cache_data.clear()
+        predictions, actuals, future_predictions = algo_trade(symbols, target_symbols, years, shift)
+        st.experimental_rerun()

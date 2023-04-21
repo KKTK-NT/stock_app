@@ -3,10 +3,12 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
+import streamlit as st
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.model_selection import GridSearchCV
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 from typing import List
+
 
 def download_stock_data(symbols: List[str], target_symbols: List[str], start_date: str, end_date: str):
     all_symbols = list(symbols + target_symbols)
@@ -43,10 +45,10 @@ def train_and_test(data, symbols, target_symbols, original_data, future_days=1):
 
         # Hyperparameter grid
         param_grid = {
-            'n_estimators': [1, 3, 20, 50, 100],
+            'n_estimators': [1, 3, 20, 50],
             'learning_rate': [0.001, 0.01, 0.05, 0.1],
-            'num_leaves': [3, 15, 31, 63],
-            'min_child_samples': [10, 20, 30]
+            'num_leaves': [3, 15, 31],
+            'min_child_samples': [3, 5, 10, 20]
         }
 
         # Grid search with cross-validation
@@ -81,8 +83,10 @@ def train_and_test(data, symbols, target_symbols, original_data, future_days=1):
 
     return predictions, actuals, future_predictions
 
-
-def algo_trade(symbols, target_symbols, start_date, end_date, shift):
+@st.cache_data
+def algo_trade(symbols, target_symbols, years, shift):
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=years*365)
     data = download_stock_data(symbols, target_symbols, start_date, end_date)
     original_data = copy.deepcopy(data)
     prepared_data = prepare_data(data, symbols, target_symbols, shift=shift)
