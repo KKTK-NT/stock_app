@@ -1,8 +1,10 @@
 import os
+import numpy as np
 import yfinance as yf
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
+import plotly.subplots as sp
 from datetime import datetime, timedelta
 from sbi_access import get_sbi_holdings
 from algo_trade import algo_trade
@@ -60,11 +62,22 @@ def display_charts(data, symbols, interval):
 
         st.plotly_chart(fig)
 
+def calculate_mape(actuals, predictions):
+    mape = np.mean(np.abs((actuals - predictions) / actuals)) * 100
+    return mape
+
 def display_prediction(target_symbols, predictions, actuals, future_predictions):
     # クロスバリデーションのもっともよかったモデルの予測と実績の対比と、
     # 一週間分の将来予測を時系列グラフにして表示
     for target_symbol in target_symbols:
+        # 時系列プロットとy-yプロットのカラムを作成
+        col1, col2 = st.columns([2, 1])
+
+        # 時系列プロット
         fig = go.Figure()
+
+        # 時系列プロットの幅を900に設定
+        fig.update_layout(width=850)
 
         fig.add_trace(go.Scatter(x=actuals[target_symbol].index,
                                 y=actuals[target_symbol]['actual'],
@@ -88,11 +101,41 @@ def display_prediction(target_symbols, predictions, actuals, future_predictions)
         fig.update_layout(title=f"{target_symbol} Predictions vs Actuals vs Forecasted",
                         xaxis_title="Date",
                         yaxis_title="Close Price")
+        col1.plotly_chart(fig)
 
-        fig.update_layout(title=f"{target_symbol} Predictions vs Actuals vs Forecasted",
-                        xaxis_title="Date",
-                        yaxis_title="Close Price")
-        st.plotly_chart(fig)
+        # y-yプロット
+        fig_yy = go.Figure()
+
+        # y-yプロットの幅を300に設定
+        fig_yy.update_layout(width=350)
+
+        fig_yy.add_trace(go.Scatter(x=actuals[target_symbol]['actual'],
+                                    y=predictions[target_symbol]['prediction'],
+                                    mode='markers',
+                                    name='Predicted vs Actual',
+                                    marker=dict(color='blue', size=5)))
+
+        # y=yの点線を追加
+        fig_yy.add_shape(
+            type='line',
+            x0=min(actuals[target_symbol]['actual']),
+            x1=max(actuals[target_symbol]['actual']),
+            y0=min(actuals[target_symbol]['actual']),
+            y1=max(actuals[target_symbol]['actual']),
+            yref='y',
+            xref='x',
+            line=dict(color='black', dash='dot')
+        )
+
+        # MAPEの計算
+        mape = calculate_mape(actuals[target_symbol]['actual'], predictions[target_symbol]['prediction'])
+
+        fig_yy.update_layout(title=f"{target_symbol} Y-Y Plot (MAPE: {mape:.2f}%)",
+                            xaxis_title="Actual",
+                            yaxis_title="Predicted")
+        col2.plotly_chart(fig_yy)
+
+
             
 stock_table, asset, balance = cached_data()
 
@@ -167,13 +210,13 @@ elif page == "アルゴリズムトレード":
     symbols = get_symbol_list("feat_symbols.txt")
     target_symbols = get_symbol_list("target_symbols.txt")
 
-    predictions, actuals, future_predictions = algo_trade(symbols, target_symbols, years, shift)
-
     start_cal = st.button("計算開始")
 
-    display_prediction(target_symbols, predictions, actuals, future_predictions)
-
     if start_cal:
-        st.cache_data.clear()
         predictions, actuals, future_predictions = algo_trade(symbols, target_symbols, years, shift)
+        display_prediction(target_symbols, predictions, actuals, future_predictions)
+        st.cache_data.clear()
         st.experimental_rerun()
+    else:
+        predictions, actuals, future_predictions = algo_trade(symbols, target_symbols, years, shift)
+        display_prediction(target_symbols, predictions, actuals, future_predictions)
