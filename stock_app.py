@@ -205,7 +205,7 @@ elif page == "アルゴリズムトレード":
     st.title("アルゴリズムトレード")
     
     years = 5 # 学習データの期間
-    shift = 1 # n 期先予測
+    shift = 5 # n 期先予測
 
     symbols = get_symbol_list("feat_symbols.txt")
     target_symbols = get_symbol_list("target_symbols.txt")

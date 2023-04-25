@@ -5,3 +5,5 @@ chromedriver.exe
 *.pyc
 __pycache__
 .pytest_cache
+/data
+/feature_selection
