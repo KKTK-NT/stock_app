@@ -2,21 +2,20 @@ import copy
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import lightgbm as lgb
+# import lightgbm as lgb
 import streamlit as st
 import os
-import requests
 from sklearn.model_selection import TimeSeriesSplit
-from sklearn.model_selection import GridSearchCV
+# from sklearn.model_selection import GridSearchCV
 from datetime import datetime, timedelta
 from typing import List
 from boruta import BorutaPy
 from sklearn.ensemble import RandomForestRegressor
+from autogluon.tabular import TabularPredictor
 
 if not os.path.exists('./data'):
     os.makedirs('./data')
 
-@st.cache_data
 def download_stock_data(symbols: List[str], target_symbols: List[str], start_date: str, end_date: str):
     all_symbols = list(symbols + target_symbols)
     data = pd.DataFrame()
@@ -49,7 +48,6 @@ def download_stock_data(symbols: List[str], target_symbols: List[str], start_dat
             data[symbol] = stock_data['Adj Close']
         except Exception as e:
             remove_symbols.append(symbol)
-            # print(symbol, e)
             pass
     for item in list(set(remove_symbols)):
         if item in symbols:
@@ -65,7 +63,6 @@ def download_stock_data(symbols: List[str], target_symbols: List[str], start_dat
 
     return data, symbols, target_symbols
 
-@st.cache_data
 def prepare_data(data, symbols, target_symbols, shift=1):
     prepared_data = {}
     for target_symbol in target_symbols:
@@ -85,7 +82,7 @@ def prepare_data(data, symbols, target_symbols, shift=1):
 
         # 欠損値NaNを過去最新の値で埋める
         prepared_data[key] = prepared_data[key].fillna(method="ffill")
-        prepared_data[key] = prepared_data[key].dropna(axis=0)
+        prepared_data[key] = prepared_data[key].dropna(axis=1)            
 
         if prepared_data[key].isnull().any().any():
             st.write(f"{key} : NaN values found.")
@@ -112,7 +109,31 @@ def save_selected_features(target_symbol, selected_features, lag):
     with open(file_name, "w") as f:
         for feature in selected_features:
             f.write(f"{feature}\n")
-            
+
+# def fit_lgb(X, y, target_symbol):
+#     X = X.drop([target_symbol], axis=1)
+#     tscv = TimeSeriesSplit(n_splits=5)
+#     model = lgb.LGBMRegressor(random_state=42)
+#     # Hyperparameter grid
+#     param_grid = {
+#         'n_estimators': [1, 3, 10],
+#         'learning_rate': [0.01, 0.05, 0.1],
+#         'num_leaves': [3, 10],
+#         'min_child_samples': [1, 3, 10]
+#     }
+
+#     # Grid search with cross-validation
+#     grid = GridSearchCV(model, param_grid, cv=tscv, scoring='neg_mean_squared_error', n_jobs=-1)
+#     grid.fit(X, y)
+    
+#     return grid.best_estimator_
+
+def fit_gluon(X, target_symbol):
+    predictor = TabularPredictor(label=target_symbol, path=f'C:/Users/rodin/work/stock_trade/', problem_type='regression')
+    predictor.fit(train_data=X, presets='best_quality', time_limit=10)
+    
+    return predictor
+
 def train_and_test(data, symbols, target_symbols, original_data, future_days=1):
     predictions = {}
     actuals = {}
@@ -129,51 +150,36 @@ def train_and_test(data, symbols, target_symbols, original_data, future_days=1):
             save_selected_features(target_symbol, selected_features, future_days)
         
         X = X[selected_features]
-        
-        tscv = TimeSeriesSplit(n_splits=3)
-
-        model = lgb.LGBMRegressor(random_state=42)
-
-        # Hyperparameter grid
-        param_grid = {
-            'n_estimators': [1, 3, 20],
-            'learning_rate': [0.01, 0.05, 0.1],
-            'num_leaves': [3, 20],
-            'min_child_samples': [3, 5]
-        }
-
-        # Grid search with cross-validation
-        grid = GridSearchCV(model, param_grid, cv=tscv, scoring='neg_mean_squared_error', n_jobs=-1)
-        grid.fit(X, y)
-
-        best_model = grid.best_estimator_
+        X[target_symbol] = y
 
         # Split data for final evaluation
         train_size = int(len(X) * 0.8)
         X_train, X_test = X[:train_size], X[train_size:]
         y_train, y_test = y[:train_size], y[train_size:]
-        # X_train, X_valid, y_train, y_valid = train_test_split(X_train, y_train, test_size=0.2, shuffle=False)
-        # best_model.fit(X_train, y_train, eval_set=[(X_valid, y_valid)], early_stopping_rounds=20)
-        best_model.fit(X_train, y_train)
+        
+        # predictor = fit_lgb(X_train, y_train, target_symbol)        # lgb predictor
+        predictor = fit_gluon(X_train, target_symbol)               # gluon predictor
+        
+        predictions[target_symbol] = pd.DataFrame(predictor.predict(X_test).values, index=y_test.index, columns=["prediction"])
 
-        predictions[target_symbol] = pd.DataFrame(best_model.predict(X_test), index=y_test.index, columns=["prediction"])
         actuals[target_symbol] = pd.DataFrame(y_test.values, index=y_test.index, columns=["actual"])
 
         future_dates = [data[target_symbol].index[-1] + timedelta(days=i) for i in range(1, future_days + 1)]
 
         # Initialize future_df with columns for all symbols
-        future_df = pd.DataFrame(index=future_dates, columns=X_train.columns)
+        future_df = pd.DataFrame(index=future_dates, columns=X.columns).drop([target_symbol], axis=1)
 
-        # Fill in future_df with recent values from original_data
-        future_df.loc[:, f'{target_symbol}_lag_{future_days}'] = original_data[target_symbol].iloc[-future_days:].values
-        for symbol in symbols:
-            future_df.loc[:, f'{symbol}_lag_{future_days}'] = original_data[symbol].iloc[-future_days:].values
-
+        for column in future_df.columns:
+            symbol, _, lag = column.split('_')
+            lag = int(lag)
+            future_df.loc[:, column] = original_data[symbol].iloc[-lag:].values
+    
         # Predict future prices for the target symbol and save the results
-        future_predictions[target_symbol] = pd.DataFrame(best_model.predict(future_df[selected_features]), index=future_dates[:len(future_df)], columns=["prediction"])
+        future_predictions[target_symbol] = pd.DataFrame(predictor.predict(future_df[selected_features]).values, index=future_dates[:len(future_df)], columns=["prediction"])
 
     return predictions, actuals, future_predictions
 
+@st.cache_data
 def algo_trade(symbols, target_symbols, years, shift):
     end_date = datetime.now()
     start_date = end_date - timedelta(days=years*365)
@@ -184,3 +190,4 @@ def algo_trade(symbols, target_symbols, years, shift):
     predictions, actuals, future_predictions = train_and_test(prepared_data, symbols, target_symbols, original_data, future_days=shift)
 
     return predictions, actuals, future_predictions
+

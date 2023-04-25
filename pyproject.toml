@@ -7,7 +7,7 @@ readme = "README.md"
 packages = [{include = "stock_trade"}]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.10,<3.11"
 yfinance = "^0.2.17"
 streamlit = "^1.21.0"
 pandas = "<2.0"
@@ -18,10 +18,11 @@ pytest = "^7.3.1"
 bs4 = "^0.0.1"
 ipykernel = "^6.22.0"
 scikit-learn = "^1.2.2"
-lightgbm = "^3.3.5"
 nbformat = "^5.8.0"
 boruta = "^0.3"
 numpy = "<1.24.0"
+autogluon = "^0.7.0"
+lightgbm = "^3.3.5"
 
 
 [build-system]
