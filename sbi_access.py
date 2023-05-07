@@ -27,7 +27,7 @@ def get_sbi_holdings(username, password):
     login_button = driver.find_element(by=By.NAME, value='ACT_login')
     login_button.click()
 
-    # 保有銘柄ページに移動
-    time.sleep(2)  # 必要に応じて調整
+    # 遷移するまで待つ
+    time.sleep(1.5)
     
     return get_table(driver)

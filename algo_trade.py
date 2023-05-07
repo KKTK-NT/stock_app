@@ -1,17 +1,15 @@
-import copy
 import yfinance as yf
 import pandas as pd
 import numpy as np
-# import lightgbm as lgb
-import streamlit as st
 import os
-from sklearn.model_selection import TimeSeriesSplit
-# from sklearn.model_selection import GridSearchCV
 from datetime import datetime, timedelta
 from typing import List
 from boruta import BorutaPy
 from sklearn.ensemble import RandomForestRegressor
-from autogluon.tabular import TabularPredictor
+from s4_reg.core import s4regressor as regressor
+from prophet import Prophet
+import matplotlib.pyplot as plt
+import io
 
 if not os.path.exists('./data'):
     os.makedirs('./data')
@@ -39,7 +37,7 @@ def download_stock_data(symbols: List[str], target_symbols: List[str], start_dat
                 pass
         else:
             stock_data = yf.download(symbol, start=start_date, end=end_date, interval='1d')
-            if not stock_data.empty and pd.isna(stock_data['Adj Close'].iloc[-1]):
+            if not stock_data.empty:
                 with open(file_name, mode='w') as f:
                     stock_data.to_csv(f)
             else:
@@ -63,29 +61,16 @@ def download_stock_data(symbols: List[str], target_symbols: List[str], start_dat
 
     return data, symbols, target_symbols
 
-def prepare_data(data, symbols, target_symbols, shift=1):
-    prepared_data = {}
-    for target_symbol in target_symbols:
-        stock_data = pd.DataFrame(data[target_symbol])
-        stock_data[f'{target_symbol}_lag_{shift}'] = data[target_symbol].shift(shift, fill_value=0)
-        for symbol in symbols:
-            if symbol != target_symbol:
-                stock_data[f'{symbol}_lag_{shift}'] = data[symbol].shift(shift, fill_value=0)
-        prepared_data[target_symbol] = stock_data
-    
-    for key in prepared_data.keys():
-        # shiftの先頭行を排除
-        prepared_data[key] = prepared_data[key].iloc[shift:,:]
+def prepare_data(data):
+    prepared_data = data.copy()
 
-        # NoneをNaNに置換
-        prepared_data[key] = prepared_data[key].replace(to_replace=['None', 'null', 'nan', 'NA'], value=np.nan)
+    # NoneをNaNに置換
+    prepared_data = prepared_data.replace(to_replace=['None', 'null', 'nan', 'NA'], value=np.nan)
 
-        # 欠損値NaNを過去最新の値で埋める
-        prepared_data[key] = prepared_data[key].fillna(method="ffill")
-        prepared_data[key] = prepared_data[key].dropna(axis=1)            
-
-        if prepared_data[key].isnull().any().any():
-            st.write(f"{key} : NaN values found.")
+    # 欠損値NaNを過去最新の値で埋める
+    prepared_data = prepared_data.fillna(method="ffill")
+    prepared_data = prepared_data.fillna(method="bfill")
+    prepared_data = prepared_data.dropna(axis=1)            
     
     return prepared_data
 
@@ -110,84 +95,104 @@ def save_selected_features(target_symbol, selected_features, lag):
         for feature in selected_features:
             f.write(f"{feature}\n")
 
-# def fit_lgb(X, y, target_symbol):
-#     X = X.drop([target_symbol], axis=1)
-#     tscv = TimeSeriesSplit(n_splits=5)
-#     model = lgb.LGBMRegressor(random_state=42)
-#     # Hyperparameter grid
-#     param_grid = {
-#         'n_estimators': [1, 3, 10],
-#         'learning_rate': [0.01, 0.05, 0.1],
-#         'num_leaves': [3, 10],
-#         'min_child_samples': [1, 3, 10]
-#     }
-
-#     # Grid search with cross-validation
-#     grid = GridSearchCV(model, param_grid, cv=tscv, scoring='neg_mean_squared_error', n_jobs=-1)
-#     grid.fit(X, y)
+def make_s4_features(
+    data,
+    target,
+    seq_len_target=180,
+    pred_len_target=1,
+    d_model_target=2048,
+    seq_len_others=10,
+    pred_len_others=1,
+    d_model_others=10
+    ):
     
-#     return grid.best_estimator_
+    data = data.reset_index()
+    data['date'] = pd.to_datetime(data['Date'])
+    data = data.drop(['Date'],axis=1)
 
-def fit_gluon(X, target_symbol):
-    predictor = TabularPredictor(label=target_symbol, path=f'C:/Users/rodin/work/stock_trade/', problem_type='regression')
-    predictor.fit(train_data=X, presets='best_quality', time_limit=10)
+    assert seq_len_target > seq_len_others
+       
+    model_target = regressor(
+        dataset = data,
+        target = target,
+        size = [seq_len_target, pred_len_target],
+        features = 'S',
+        d_model = d_model_target,
+        device = 'cpu'
+    )
     
-    return predictor
+    feat_df_target = model_target.get_features(data)
+    feat_df_target = feat_df_target.drop([target], axis=1)
+    
+    model_others = regressor(
+        dataset = data,
+        target = target,
+        size = [seq_len_others, pred_len_others],
+        features = 'MS',
+        d_model = d_model_others,
+        device = 'cpu'
+    )
+    
+    feat_df_others = model_others.get_features(data).iloc[seq_len_target-seq_len_others:,:]
+    feat_df_others = feat_df_others.drop([target], axis=1)
+    feat_df_others.columns = [f'exog_feat_{i+1}' for i in range(len(feat_df_others.columns))]
 
-def train_and_test(data, symbols, target_symbols, original_data, future_days=1):
-    predictions = {}
-    actuals = {}
-    future_predictions = {}
+    features = pd.concat([
+                          feat_df_target,
+                          feat_df_others
+                          ], axis=1)
+    
+    return features
+    
+def make_fig_prophet(
+    data,
+    target,
+    days=500,
+    periods=20
+    ):
+    
+    data = data[target].reset_index()
+    data['Date'] = pd.to_datetime(data['Date'])
+
+    prophet_train = data.rename(columns={target:'y', 'Date':'ds'})
+    model_prophet = Prophet()
+    model_prophet.fit(prophet_train)
+    future = model_prophet.make_future_dataframe(periods=periods)
+    forecast = model_prophet.predict(future)
+    
+    model_prophet.plot(forecast)
+    xmin = datetime.today() - timedelta(days=days)
+    xmax = datetime.today() + timedelta(days=periods)
+    holidays = int(days/30.5*8)
+    ymin = np.min(forecast['yhat'].iloc[-days+holidays-periods:])
+    ymax = np.max(forecast['yhat'].iloc[-days+holidays-periods:])
+    ave  = (ymin + ymax) / 2.0
+    plt.title(f'{target}')
+    plt.xlim([xmin, xmax])
+    plt.ylim([ymin-ave*0.15, ymax+ave*0.15])
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    buf.seek(0)
+
+    return buf.getvalue()
+    
+def get_feature(data, target_symbols):
+    features = {}
+    figures = {}
 
     for target_symbol in target_symbols:
-        X = data[target_symbol].drop([target_symbol], axis=1)
-        y = data[target_symbol][target_symbol]
+        features[target_symbol] = make_s4_features(data, target_symbol)
+        figures[target_symbol] = make_fig_prophet(data, target_symbol)
+ 
+    return features, figures
 
-        # Perform feature selection using Boruta
-        selected_features = load_selected_features(target_symbol, future_days)
-        if not selected_features:
-            selected_features = feature_selection(X, y)
-            save_selected_features(target_symbol, selected_features, future_days)
-        
-        X = X[selected_features]
-        X[target_symbol] = y
-
-        # Split data for final evaluation
-        train_size = int(len(X) * 0.8)
-        X_train, X_test = X[:train_size], X[train_size:]
-        y_train, y_test = y[:train_size], y[train_size:]
-        
-        # predictor = fit_lgb(X_train, y_train, target_symbol)        # lgb predictor
-        predictor = fit_gluon(X_train, target_symbol)               # gluon predictor
-        
-        predictions[target_symbol] = pd.DataFrame(predictor.predict(X_test).values, index=y_test.index, columns=["prediction"])
-
-        actuals[target_symbol] = pd.DataFrame(y_test.values, index=y_test.index, columns=["actual"])
-
-        future_dates = [data[target_symbol].index[-1] + timedelta(days=i) for i in range(1, future_days + 1)]
-
-        # Initialize future_df with columns for all symbols
-        future_df = pd.DataFrame(index=future_dates, columns=X.columns).drop([target_symbol], axis=1)
-
-        for column in future_df.columns:
-            symbol, _, lag = column.split('_')
-            lag = int(lag)
-            future_df.loc[:, column] = original_data[symbol].iloc[-lag:].values
-    
-        # Predict future prices for the target symbol and save the results
-        future_predictions[target_symbol] = pd.DataFrame(predictor.predict(future_df[selected_features]).values, index=future_dates[:len(future_df)], columns=["prediction"])
-
-    return predictions, actuals, future_predictions
-
-@st.cache_data
-def algo_trade(symbols, target_symbols, years, shift):
-    end_date = datetime.now()
+def main_process(symbols, target_symbols, years):
+    end_date = datetime.now().replace(microsecond=0, second=0, minute=0)
     start_date = end_date - timedelta(days=years*365)
     data, symbols, target_symbols = download_stock_data(symbols, target_symbols, start_date, end_date)
-    original_data = copy.deepcopy(data)
-    prepared_data = prepare_data(data, symbols, target_symbols, shift=shift)
-    
-    predictions, actuals, future_predictions = train_and_test(prepared_data, symbols, target_symbols, original_data, future_days=shift)
+    prepared_data = prepare_data(data)
 
-    return predictions, actuals, future_predictions
+    features, figures = get_feature(prepared_data, target_symbols)
 
+    return features, figures

@@ -22,7 +22,7 @@ def export_data(df_result, name):
 
 def get_table_ja(driver):
     # 遷移するまで待つ
-    time.sleep(2)
+    time.sleep(0.5)
 
     # ポートフォリオの画面に遷移
     driver.find_element(by=By.XPATH, value='//*[@id="link02M"]/ul/li[1]/a/img').click()
@@ -68,7 +68,7 @@ def get_table_ja(driver):
 
 def get_table_en(driver):
     # 遷移するまで待つ
-    time.sleep(2)
+    time.sleep(0.5)
 
     # ポートフォリオの画面に遷移
     # driver.find_element(by=By.XPATH, value='//*[@id="link02M"]/ul/li[3]/a/img').click()
@@ -133,7 +133,7 @@ def get_table_en(driver):
 
 def get_balance(driver):
     # 遷移するまで待つ
-    time.sleep(2)
+    time.sleep(0.5)
 
     # ポートフォリオの画面に遷移
     driver.find_element(by=By.XPATH, value='//*[@id="link02M"]/ul/li[3]/a/img').click()

@@ -8,3 +8,5 @@ __pycache__
 /data
 /feature_selection
 /check
+/s4_reg
+/checkpoints

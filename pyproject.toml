@@ -9,7 +9,6 @@ packages = [{include = "stock_trade"}]
 [tool.poetry.dependencies]
 python = "^3.10,<3.11"
 yfinance = "^0.2.17"
-streamlit = "^1.21.0"
 pandas = "<2.0"
 plotly = "^5.14.1"
 selenium = "^4.8.3"
@@ -21,8 +20,18 @@ scikit-learn = "^1.2.2"
 nbformat = "^5.8.0"
 boruta = "^0.3"
 numpy = "<1.24.0"
-autogluon = "^0.7.0"
 lightgbm = "^3.3.5"
+hydra-core = ">=1.3.1"
+pytorch-lightning = "1.5.10"
+dotmap = ">=1.3.30"
+rich = ">=13.1.0"
+torchaudio = ">=0.13.1"
+torchvision = ">=0.14.1"
+einops = ">=0.6.0"
+opt-einsum = "^3.3.0"
+matplotlib = "^3.7.1"
+prophet = "^1.1.2"
+streamlit = "^1.22.0"
 
 
 [build-system]
