@@ -2,6 +2,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 from collections import defaultdict
+from collections import OrderedDict
 
 
 class StockTradingEnv(gym.Env):
@@ -86,7 +87,7 @@ class StockTradingEnv(gym.Env):
         return total_value - self.initial_investment
 
     def _get_observation(self):
-        obs_dict = {}
+        obs_dict = OrderedDict()
         for stock in self.stock_data.columns:
             stock_price = self.stock_data.loc[self.current_step, stock]
             exog_data = self.exogenous_data_dict[stock]
