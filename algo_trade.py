@@ -18,6 +18,11 @@ def download_stock_data(symbols: List[str], target_symbols: List[str], start_dat
     all_symbols = list(symbols + target_symbols)
     data = pd.DataFrame()
     remove_symbols = []
+
+    # Download JPY=X data first
+    jpy_data = yf.download("JPY=X", start=start_date, end=end_date, interval='1d')
+    jpy_data = jpy_data["Adj Close"]
+
     for symbol in list(set(all_symbols)):
         file_name = f"./data/{symbol}.csv"
         if os.path.isfile(file_name):
@@ -26,32 +31,39 @@ def download_stock_data(symbols: List[str], target_symbols: List[str], start_dat
             last_date = stock_data.index[-1]
             if last_date >= pd.Timestamp(datetime.now()):
                 new_data = yf.download(symbol, start=last_date.date() + timedelta(days=1), end=end_date, interval='1d')
-                if not new_data.empty and pd.isna(new_data['Adj Close'].iloc[-1]):
+                if not new_data.empty and not pd.isna(new_data['Adj Close'].iloc[-1]):
+                    # Convert US stocks to JPY
+                    if symbol[-2:] != ".T" and symbol != "JPY=X":
+                        stock_data = stock_data.mul(jpy_data, axis=0)
                     stock_data = stock_data.append(new_data)
                     stock_data = stock_data[~stock_data.index.duplicated(keep='last')]
                     with open(file_name, mode='w') as f:
                         stock_data.to_csv(f)
                 else:
                     remove_symbols.append(symbol)
-            else:
-                pass
         else:
             stock_data = yf.download(symbol, start=start_date, end=end_date, interval='1d')
             if not stock_data.empty:
+                # Convert US stocks to JPY
+                if symbol[-2:] != ".T" and symbol != "JPY=X":
+                    stock_data = stock_data.mul(jpy_data, axis=0)
                 with open(file_name, mode='w') as f:
                     stock_data.to_csv(f)
             else:
                 remove_symbols.append(symbol)
+
         try:
             data[symbol] = stock_data['Adj Close']
         except Exception as e:
             remove_symbols.append(symbol)
             pass
+
     for item in list(set(remove_symbols)):
         if item in symbols:
             symbols.remove(item)
         if item in target_symbols:
             target_symbols.remove(item)
+
     with open("./feat_symbols.txt", "w") as f:
         for symbol in symbols:
             f.write(f"{symbol}\n")

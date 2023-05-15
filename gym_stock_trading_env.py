@@ -6,7 +6,7 @@ from collections import OrderedDict
 
 
 class StockTradingEnv(gym.Env):
-    def __init__(self, stock_data, exogenous_data_dict, max_shares=500):
+    def __init__(self, stock_data, exogenous_data_dict, max_shares=3000, min_shares=10):
         super().__init__()
 
         self.stock_data = stock_data.reset_index(drop=True)
@@ -25,11 +25,15 @@ class StockTradingEnv(gym.Env):
         space_dict = {
             f"T_{stock.replace('.', '_')}": spaces.Box(low=-np.inf, high=np.inf, shape=(n_features,), dtype=np.float32) for stock in stock_data.columns
         }
+        space_dict["cash"] = spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32)  # Add cash to the observation space
         self.observation_space = spaces.Dict(space_dict)
-
-        self.action_space = spaces.MultiDiscrete([2] * (len(self.stock_data.columns) + 1))
+        self.min_shares = min_shares
+        self.action_space = spaces.MultiDiscrete([3] * len(self.stock_data.columns))
         
-    def reset(self, seed=None, options={}):
+        
+    def reset(self, seed=41, options={}):
+        if seed is not None:
+            np.random.seed(seed)
         self.current_step = self._reset_data()
         self.positions.clear()
         self.cash = self.initial_investment
@@ -38,38 +42,39 @@ class StockTradingEnv(gym.Env):
 
     def step(self, action):
         if self._is_done():
-            return self._get_observation(), 0, True, {}
+            return self._get_observation(), 0, True, {}, {}
         
         assert len(action) == self.action_space.shape[0], "Invalid action shape."
         
-        trade_amounts = action[:-1] * 2 - 1
-        trade_type = action[-1]
-        
         info = {}
         for i, stock in enumerate(self.stock_data.columns):
-            trade_amount = trade_amounts[i]
+            trade_action = action[i]
             stock_price = self.stock_data.loc[self.current_step, stock]
-            if trade_amount > 0 and self.positions[stock] < self.max_shares:
-                shares_to_buy = min(trade_amount, self.max_shares - self.positions[stock])
-                cost = shares_to_buy * stock_price * (1 + self.transaction_fee_rate)
-                if cost <= self.cash:
+            cost = 0
+            sell_value = 0
+            if trade_action == 1 and self.positions[stock] < self.max_shares:  # Buy
+                shares_to_buy = min(self.min_shares, self.max_shares - self.positions[stock])
+                cost_judge = shares_to_buy * stock_price * (1 + self.transaction_fee_rate)
+                if cost_judge <= self.cash:
                     self.positions[stock] += shares_to_buy
-                    self.cash -= cost
-            elif trade_amount < 0 and self.positions[stock] > 0:
-                shares_to_sell = min(abs(trade_amount), self.positions[stock])
+                    self.cash -= cost_judge
+                    cost = shares_to_buy * stock_price * (1 + self.transaction_fee_rate)
+            elif trade_action == 2 and self.positions[stock] > 0:  # Sell
+                shares_to_sell = min(self.min_shares, self.positions[stock])
                 sell_value = shares_to_sell * stock_price
                 transaction_fee = sell_value * self.transaction_fee_rate
                 self.positions[stock] -= shares_to_sell
                 self.sell_history.append(sell_value)
                 self.cash += sell_value - transaction_fee
-                info[stock] = {'sell_value': sell_value}
+            info[stock] = {'cost': cost, 'sell_value': sell_value}
 
         self.current_step = self._next_step()
         reward = self._get_reward()
         done = self._is_done()
         truncated = False
         self.state = self._get_observation()
-        return self.state, reward, done, truncated, {}
+        return self.state, reward, done, truncated, info
+
 
     def _reset_data(self):
         return 0
@@ -84,7 +89,14 @@ class StockTradingEnv(gym.Env):
         total_value = self.cash
         for stock, shares in self.positions.items():
             total_value += shares * self.stock_data.loc[self.current_step, stock]
-        return total_value - self.initial_investment
+
+        reward = total_value - self.initial_investment
+
+        if total_value < self.initial_investment:
+            penalty = self.initial_investment - total_value
+            reward -= penalty
+
+        return reward
 
     def _get_observation(self):
         obs_dict = OrderedDict()
@@ -94,6 +106,8 @@ class StockTradingEnv(gym.Env):
             obs_array = np.concatenate(([stock_price], exog_data.iloc[self.current_step].values), axis=0)
             obs_key = f"T_{stock.replace('.', '_')}"
             obs_dict[obs_key] = obs_array
+
+        obs_dict["cash"] = np.array([self.cash])  # Add cash to the observation
 
         return obs_dict
 
