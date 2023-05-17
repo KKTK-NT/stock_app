@@ -17,9 +17,11 @@ class StockTradingEnv(gym.Env):
         self.initial_investment = 1000000
         self.cash = self.initial_investment
         self.sell_history = []
-        self.transaction_fee_rate = 0.0055
+        self.transaction_fee_rate = 0.00055
         self.shares_amounts = [500, 300, 200, 100, 50, 10, 0, -10, -50, -100, -200, -300, -500]
-
+        self.min_reward = -2.
+        self.max_reward = 2.
+        
         n_stocks = len(stock_data.columns)
         n_features = len(next(iter(exogenous_data_dict.values())).columns) + 1  # Stock price column is added to the features
 
@@ -45,7 +47,7 @@ class StockTradingEnv(gym.Env):
         if self._is_done():
             return self._get_observation(), 0, True, {}, {}
         
-        assert len(action) == self.action_space.shape[0], "Invalid action shape."
+        # assert len(action) == self.action_space.shape[0], "Invalid action shape."
         
         info = {}
         for i, stock in enumerate(self.stock_data.columns):
@@ -59,7 +61,7 @@ class StockTradingEnv(gym.Env):
                 if cost_judge <= self.cash:
                     self.positions[stock] += shares_to_buy
                     self.cash -= cost_judge
-                    cost = shares_to_buy * stock_price * (1 + self.transaction_fee_rate)
+                    cost = cost_judge
             elif trade_action < 0 and self.positions[stock] > 0:  # Sell
                 shares_to_sell = min(-trade_action, self.positions[stock])
                 sell_value = shares_to_sell * stock_price
@@ -96,6 +98,9 @@ class StockTradingEnv(gym.Env):
         if total_value < self.initial_investment:
             penalty = self.initial_investment - total_value
             reward -= penalty
+            
+        reward = (reward - self.min_reward) / (self.max_reward - self.min_reward)
+        reward = reward * 2 - 1
 
         return reward
 
