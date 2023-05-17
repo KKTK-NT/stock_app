@@ -4,14 +4,13 @@ from gymnasium import spaces
 from collections import defaultdict
 from collections import OrderedDict
 
-
 class StockTradingEnv(gym.Env):
     def __init__(self, stock_data, exogenous_data_dict, max_shares=3000, min_shares=10):
         super().__init__()
 
         self.stock_data = stock_data.reset_index(drop=True)
         self.exogenous_data_dict = exogenous_data_dict
-        self.current_step = None
+        self.current_step = 0
         self.positions = defaultdict(int)
         self.max_shares = max_shares
         self.initial_investment = 1000000
@@ -21,40 +20,34 @@ class StockTradingEnv(gym.Env):
         self.shares_amounts = [500, 300, 200, 100, 50, 10, 0, -10, -50, -100, -200, -300, -500]
         self.min_reward = -2.
         self.max_reward = 2.
-        
+
         n_stocks = len(stock_data.columns)
-        n_features = len(next(iter(exogenous_data_dict.values())).columns) + 1  # Stock price column is added to the features
+        n_features = len(next(iter(exogenous_data_dict.values())).columns) + 1
 
         space_dict = {
             f"T_{stock.replace('.', '_')}": spaces.Box(low=-np.inf, high=np.inf, shape=(n_features,), dtype=np.float32) for stock in stock_data.columns
         }
-        space_dict["cash"] = spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32)  # Add cash to the observation space
+        space_dict["cash"] = spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32)
+        space_dict["action_mask"] = spaces.Box(low=0, high=1, shape=(n_stocks, len(self.shares_amounts)), dtype=np.int64)
+
         self.observation_space = spaces.Dict(space_dict)
         self.min_shares = min_shares
 
-        self.action_space = spaces.Dict({
-            stock: spaces.Dict({
-                'avail_actions': spaces.Discrete(len(self.shares_amounts)),
-                'action_mask': spaces.MultiBinary(len(self.shares_amounts))
-            }) for stock in self.stock_data.columns
-        })
+        self.action_space = spaces.MultiDiscrete([len(self.shares_amounts)]*n_stocks)
         
     def reset(self, seed=None, options={}):
         if seed is not None:
             np.random.seed(seed)
             
-        # Assuming _reset_data() returns the initial step index
         self.current_step = self._reset_data()
         
-        # Reset positions
         for stock in self.stock_data.columns:
             self.positions[stock] = 0
             
         self.cash = self.initial_investment
         self.state = self._get_observation()
-
+        
         return self.state, {}
-        # return {'state': self.state, 'avail_actions': self.shares_amounts, 'action_mask': action_mask}, {}
 
     def step(self, action):
         if self._is_done():
@@ -62,15 +55,7 @@ class StockTradingEnv(gym.Env):
 
         info = {}
         for i, stock in enumerate(self.stock_data.columns):
-            trade_action = self.shares_amounts[action[stock]['avail_actions']]
-            # action_mask = action[stock]['action_mask']
-            
-            # print("print")
-            # print(action)
-            # print(i, action['avail_actions'])
-            # print(action['avail_actions'])
-            # print(self.shares_amounts[action['avail_actions']])
-
+            trade_action = self.shares_amounts[action[i]]
             stock_price = self.stock_data.loc[self.current_step, stock]
             cost = 0
             sell_value = 0
@@ -86,19 +71,16 @@ class StockTradingEnv(gym.Env):
                 self.positions[stock] -= shares_to_sell
                 sell_value += shares_to_sell * stock_price * (1 - self.transaction_fee_rate)
                 self.sell_history.append(sell_value)
-
-        self.cash += sell_value - cost
+                self.cash += sell_value - cost
 
         self.current_step += 1
         self.state = self._get_observation()
-        self.action_mask = self._get_action_mask()
 
         reward = self._get_reward()
         done = self._is_done()
         truncated = False
         info = {'current_step': self.current_step, 'positions': self.positions, 'cash': self.cash}
 
-        # return {'state': self.state, 'avail_actions': self.shares_amounts, 'action_mask': self.action_mask}, reward, done, truncated, info
         return self.state, reward, done, truncated, info
 
     def _reset_data(self):
@@ -106,9 +88,6 @@ class StockTradingEnv(gym.Env):
 
     def _is_done(self):
         return self.current_step >= len(self.stock_data) - 1
-
-    def _next_step(self):
-        return self.current_step + 1
 
     def _get_reward(self):
         total_value = self.cash
@@ -135,12 +114,11 @@ class StockTradingEnv(gym.Env):
             obs_key = f"T_{stock.replace('.', '_')}"
             obs_dict[obs_key] = obs_array
 
-        obs_dict["cash"] = np.array([self.cash])  # Add cash to the observation
-
+        obs_dict["cash"] = np.array([self.cash])
+        obs_dict["action_mask"] = self._get_action_mask()
         return obs_dict
 
     def _get_action_mask(self):
-        # Define a method to generate the action mask based on the current state
         action_mask = np.ones((len(self.stock_data.columns), len(self.shares_amounts)))
         for j, stock in enumerate(self.stock_data.columns):
             for i, shares in enumerate(self.shares_amounts):
@@ -150,4 +128,7 @@ class StockTradingEnv(gym.Env):
                 elif shares < 0:  # Selling
                     if self.positions[stock] < self.min_shares:
                         action_mask[j, i] = 0  # Not enough shares to sell
+                if self.positions[stock] + shares > self.max_shares:  # Buying more than max_shares
+                    action_mask[j, i] = 0
+                        
         return action_mask
