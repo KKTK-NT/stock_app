@@ -29,6 +29,7 @@ class StockTradingEnv(gym.Env):
             f"T_{stock.replace('.', '_')}": spaces.Box(low=-np.inf, high=np.inf, shape=(n_features,), dtype=np.float32) for stock in stock_data.columns
         }
         space_dict["cash"] = spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32)  # Add cash to the observation space
+        space_dict["positions"] = spaces.Box(low=0, high=max_shares, shape=(len(stock_data.columns),), dtype=np.float32)  # Add cash to the observation space
         self.observation_space = spaces.Dict(space_dict)
         self.min_shares = min_shares
         self.action_space = spaces.MultiDiscrete([len(self.shares_amounts)] * len(self.stock_data.columns))
@@ -106,14 +107,17 @@ class StockTradingEnv(gym.Env):
 
     def _get_observation(self):
         obs_dict = OrderedDict()
+        pos = []
         for stock in self.stock_data.columns:
             stock_price = self.stock_data.loc[self.current_step, stock]
             exog_data = self.exogenous_data_dict[stock]
             obs_array = np.concatenate(([stock_price], exog_data.iloc[self.current_step].values), axis=0)
             obs_key = f"T_{stock.replace('.', '_')}"
             obs_dict[obs_key] = obs_array
+            pos.append(self.positions[stock])
 
         obs_dict["cash"] = np.array([self.cash])  # Add cash to the observation
+        obs_dict["positions"] = np.array(pos)  # Add positions to the observation
 
         return obs_dict
 
