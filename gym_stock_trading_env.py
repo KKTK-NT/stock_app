@@ -19,8 +19,8 @@ class StockTradingEnv(gym.Env):
         self.sell_history = []
         self.transaction_fee_rate = 0.00055
         self.shares_amounts = [500, 300, 200, 100, 50, 10, 0, -10, -50, -100, -200, -300, -500]
-        self.min_reward = -2.
-        self.max_reward = 2.
+        self.min_reward = -1.e9
+        self.max_reward = 1.e9
         
         n_stocks = len(stock_data.columns)
         n_features = len(next(iter(exogenous_data_dict.values())).columns) + 1  # Stock price column is added to the features
