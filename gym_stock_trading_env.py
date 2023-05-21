@@ -6,14 +6,13 @@ from collections import OrderedDict
 
 
 class StockTradingEnv(gym.Env):
-    def __init__(self, stock_data, exogenous_data_dict, max_shares=3000, min_shares=10):
+    def __init__(self, stock_data, exogenous_data_dict):
         super().__init__()
 
         self.stock_data = stock_data.reset_index(drop=True)
         self.exogenous_data_dict = exogenous_data_dict
         self.current_step = None
         self.positions = defaultdict(int)
-        self.max_shares = max_shares
         self.initial_investment = 1000000
         self.cash = self.initial_investment
         self.sell_history = []
@@ -29,9 +28,8 @@ class StockTradingEnv(gym.Env):
             f"T_{stock.replace('.', '_')}": spaces.Box(low=-np.inf, high=np.inf, shape=(n_features,), dtype=np.float32) for stock in stock_data.columns
         }
         space_dict["cash"] = spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32)  # Add cash to the observation space
-        space_dict["positions"] = spaces.Box(low=0, high=max_shares, shape=(len(stock_data.columns),), dtype=np.float32)  # Add cash to the observation space
+        space_dict["positions"] = spaces.Box(low=0, high=np.inf, shape=(len(stock_data.columns),), dtype=np.float32)  # Add cash to the observation space
         self.observation_space = spaces.Dict(space_dict)
-        self.min_shares = min_shares
         self.action_space = spaces.MultiDiscrete([len(self.shares_amounts)] * len(self.stock_data.columns))
         
         
@@ -48,32 +46,40 @@ class StockTradingEnv(gym.Env):
         if self._is_done():
             return self._get_observation(), 0, True, {}, {}
         
-        # assert len(action) == self.action_space.shape[0], "Invalid action shape."
-        
         info = {}
+        wrong_selection_penalty = 0
         for i, stock in enumerate(self.stock_data.columns):
             trade_action = self.shares_amounts[action[i]]
             stock_price = self.stock_data.loc[self.current_step, stock]
             cost = 0
             sell_value = 0
-            if trade_action > 0 and self.positions[stock] < self.max_shares:  # Buy
-                shares_to_buy = min(trade_action, self.max_shares - self.positions[stock])
+            if trade_action > 0:  # Buy
+                shares_to_buy = trade_action
                 cost_judge = shares_to_buy * stock_price * (1 + self.transaction_fee_rate)
                 if cost_judge <= self.cash:
                     self.positions[stock] += shares_to_buy
                     self.cash -= cost_judge
                     cost = cost_judge
+                else:
+                    wrong_selection_penalty += 1
             elif trade_action < 0 and self.positions[stock] > 0:  # Sell
-                shares_to_sell = min(-trade_action, self.positions[stock])
-                sell_value = shares_to_sell * stock_price
-                transaction_fee = sell_value * self.transaction_fee_rate
-                self.positions[stock] -= shares_to_sell
-                self.sell_history.append(sell_value)
-                self.cash += sell_value - transaction_fee
+                if self.positions[stock] + trade_action >=0:
+                    # shares_to_sell = min(-trade_action, self.positions[stock])
+                    shares_to_sell = -trade_action
+                    sell_value = shares_to_sell * stock_price
+                    transaction_fee = sell_value * self.transaction_fee_rate
+                    self.positions[stock] -= shares_to_sell
+                    self.sell_history.append(sell_value)
+                    self.cash += sell_value - transaction_fee
+                else:
+                    wrong_selection_penalty += 1
+            elif trade_action == 0:
+                pass
+
             info[stock] = {'cost': cost, 'sell_value': sell_value}
 
         self.current_step = self._next_step()
-        reward = self._get_reward()
+        reward = self._get_reward(wrong_selection_penalty)
         done = self._is_done()
         truncated = False
         self.state = self._get_observation()
@@ -89,7 +95,7 @@ class StockTradingEnv(gym.Env):
     def _next_step(self):
         return self.current_step + 1
 
-    def _get_reward(self):
+    def _get_reward(self, additional_penalty):
         total_value = self.cash
         for stock, shares in self.positions.items():
             total_value += shares * self.stock_data.loc[self.current_step, stock]
@@ -103,7 +109,7 @@ class StockTradingEnv(gym.Env):
         reward = (reward - self.min_reward) / (self.max_reward - self.min_reward)
         reward = reward * 2 - 1
 
-        return reward
+        return reward - additional_penalty * 0.001
 
     def _get_observation(self):
         obs_dict = OrderedDict()
