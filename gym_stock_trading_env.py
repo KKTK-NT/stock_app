@@ -18,8 +18,8 @@ class StockTradingEnv(gym.Env):
         self.sell_history = []
         self.transaction_fee_rate = 0.00055
         self.shares_amounts = [500, 300, 200, 100, 50, 10, 0, -10, -50, -100, -200, -300, -500]
-        self.min_reward = -2.
-        self.max_reward = 2.
+        self.min_reward = -1.e9
+        self.max_reward = 1.e9
 
         n_stocks = len(stock_data.columns)
         n_features = len(next(iter(exogenous_data_dict.values())).columns) + 1
@@ -28,7 +28,8 @@ class StockTradingEnv(gym.Env):
             f"T_{stock.replace('.', '_')}": spaces.Box(low=-np.inf, high=np.inf, shape=(n_features,), dtype=np.float32) for stock in stock_data.columns
         }
         space_dict["cash"] = spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32)
-        space_dict["action_mask"] = spaces.Box(low=0, high=1, shape=(n_stocks, len(self.shares_amounts)), dtype=np.int64)
+        space_dict["avail_actions"] = spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.shares_amounts),), dtype=np.float32)
+        space_dict["action_mask"] = spaces.Box(low=0, high=1, shape=(n_stocks, len(self.shares_amounts)), dtype=np.float32)
 
         self.observation_space = spaces.Dict(space_dict)
         self.min_shares = min_shares
@@ -110,16 +111,18 @@ class StockTradingEnv(gym.Env):
         for stock in self.stock_data.columns:
             stock_price = self.stock_data.loc[self.current_step, stock]
             exog_data = self.exogenous_data_dict[stock]
+            # print(np.shape(self.exogenous_data_dict[stock]))
             obs_array = np.concatenate(([stock_price], exog_data.iloc[self.current_step].values), axis=0)
             obs_key = f"T_{stock.replace('.', '_')}"
             obs_dict[obs_key] = obs_array
 
         obs_dict["cash"] = np.array([self.cash])
+        obs_dict["avail_actions"] = np.array([500, 300, 200, 100, 50, 10, 0, -10, -50, -100, -200, -300, -500])
         obs_dict["action_mask"] = self._get_action_mask()
         return obs_dict
 
     def _get_action_mask(self):
-        action_mask = np.ones((len(self.stock_data.columns), len(self.shares_amounts)))
+        action_mask = np.ones((len(self.stock_data.columns), len(self.shares_amounts)), dtype=np.float32)
         for j, stock in enumerate(self.stock_data.columns):
             for i, shares in enumerate(self.shares_amounts):
                 if shares > 0:  # Buying
