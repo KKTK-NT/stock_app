@@ -13,9 +13,8 @@ class StockTradingEnv(gym.Env):
         self.exogenous_data_dict = exogenous_data_dict
         self.current_step = None
         self.positions = defaultdict(int)
-        self.initial_investment = 1000000
+        self.initial_investment = 4000000
         self.cash = self.initial_investment
-        self.sell_history = []
         self.transaction_fee_rate = 0.00055
         self.shares_amounts = [500, 300, 200, 100, 50, 10, 0, -10, -50, -100, -200, -300, -500]
         self.min_reward = -1.e9
@@ -45,36 +44,47 @@ class StockTradingEnv(gym.Env):
     def step(self, action):
         if self._is_done():
             return self._get_observation(), 0, True, {}, {}
-        
+         
         info = {}
         wrong_selection_penalty = 0
         for i, stock in enumerate(self.stock_data.columns):
+            
+            # Define minimum transaction units for each stock
+            min_transaction_unit = 10 if stock == "1557.T" else (100 if stock.endswith(".T") else 10)
+               
             trade_action = self.shares_amounts[action[i]]
             stock_price = self.stock_data.loc[self.current_step, stock]
             cost = 0
             sell_value = 0
-            if trade_action > 0:  # Buy
+            
+            if trade_action == 0:  # Hold, do nothing
+                pass
+
+            elif trade_action > 0:  # Buy
                 shares_to_buy = trade_action
                 cost_judge = shares_to_buy * stock_price * (1 + self.transaction_fee_rate)
-                if cost_judge <= self.cash:
+
+                # Check if the agent can afford the purchase and meets the minimum transaction unit
+                if cost_judge > self.cash or shares_to_buy < min_transaction_unit:
+                    # print("buy_NG : stock, share, min, cash, buy", stock, shares_to_buy, min_transaction_unit, self.cash, cost_judge)
+                    wrong_selection_penalty += 1
+                else:
                     self.positions[stock] += shares_to_buy
                     self.cash -= cost_judge
                     cost = cost_judge
-                else:
+
+            else:  # Sell
+                shares_to_sell = -trade_action
+
+                # Check if the agent has enough shares to sell and meets the minimum transaction unit
+                if self.positions[stock] < shares_to_sell or shares_to_sell < min_transaction_unit:
+                    # print("sell_NG : stock, share, min, pos", stock, shares_to_sell, min_transaction_unit, self.positions[stock])
                     wrong_selection_penalty += 1
-            elif trade_action < 0 and self.positions[stock] > 0:  # Sell
-                if self.positions[stock] + trade_action >=0:
-                    # shares_to_sell = min(-trade_action, self.positions[stock])
-                    shares_to_sell = -trade_action
-                    sell_value = shares_to_sell * stock_price
+                else:
+                    sell_value = shares_to_sell * stock_price * (1 - self.transaction_fee_rate)
                     transaction_fee = sell_value * self.transaction_fee_rate
                     self.positions[stock] -= shares_to_sell
-                    self.sell_history.append(sell_value)
                     self.cash += sell_value - transaction_fee
-                else:
-                    wrong_selection_penalty += 1
-            elif trade_action == 0:
-                pass
 
             info[stock] = {'cost': cost, 'sell_value': sell_value}
 
@@ -84,6 +94,7 @@ class StockTradingEnv(gym.Env):
         truncated = False
         self.state = self._get_observation()
         return self.state, reward, done, truncated, info
+
 
 
     def _reset_data(self):
@@ -108,8 +119,8 @@ class StockTradingEnv(gym.Env):
             
         reward = (reward - self.min_reward) / (self.max_reward - self.min_reward)
         reward = reward * 2 - 1
-
-        return reward - additional_penalty * 0.001
+        # print(additional_penalty)
+        return reward - additional_penalty * 0.0005
 
     def _get_observation(self):
         obs_dict = OrderedDict()
