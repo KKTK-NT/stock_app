@@ -19,8 +19,9 @@ class StockTradingEnv(gym.Env):
         self.shares_amounts = [500, 300, 200, 100, 50, 10, 0, -10, -50, -100, -200, -300, -500]
         self.min_reward = -1.e9
         self.max_reward = 1.e9
-        
-        n_stocks = len(stock_data.columns)
+        self.total_additional_penalty = 0
+        self.steps_per_episode = 0
+                
         n_features = len(next(iter(exogenous_data_dict.values())).columns) + 1  # Stock price column is added to the features
 
         space_dict = {
@@ -39,6 +40,8 @@ class StockTradingEnv(gym.Env):
         self.positions.clear()
         self.cash = self.initial_investment
         self.state = self._get_observation()
+        self.total_additional_penalty = 0
+        self.steps_per_episode = 0
         return (self.state, {})
 
     def step(self, action):
@@ -88,6 +91,12 @@ class StockTradingEnv(gym.Env):
 
             info[stock] = {'cost': cost, 'sell_value': sell_value}
 
+        self.total_additional_penalty += wrong_selection_penalty
+        self.steps_per_episode += 1
+        average_additional_penalty = self.total_additional_penalty / self.steps_per_episode
+        info["average_additional_penalty"] = average_additional_penalty
+        print("Average penalty per step in this iteration:", info["average_additional_penalty"])
+        
         self.current_step = self._next_step()
         reward = self._get_reward(wrong_selection_penalty)
         done = self._is_done()
@@ -119,8 +128,8 @@ class StockTradingEnv(gym.Env):
             
         reward = (reward - self.min_reward) / (self.max_reward - self.min_reward)
         reward = reward * 2 - 1
-        # print(additional_penalty)
-        return reward - additional_penalty * 0.0005
+
+        return reward - additional_penalty * 0.05
 
     def _get_observation(self):
         obs_dict = OrderedDict()
