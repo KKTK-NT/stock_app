@@ -95,7 +95,7 @@ class StockTradingEnv(gym.Env):
         self.steps_per_episode += 1
         average_additional_penalty = self.total_additional_penalty / self.steps_per_episode
         info["average_additional_penalty"] = average_additional_penalty
-        print("Average penalty per step in this iteration:", info["average_additional_penalty"])
+        print("Average penalty per step:", info["average_additional_penalty"])
         
         self.current_step = self._next_step()
         reward = self._get_reward(wrong_selection_penalty)
@@ -129,7 +129,9 @@ class StockTradingEnv(gym.Env):
         reward = (reward - self.min_reward) / (self.max_reward - self.min_reward)
         reward = reward * 2 - 1
 
-        return reward - additional_penalty * 0.05
+        return reward - additional_penalty * 0.05 / len(self.stock_data.columns) * 5. / 200.
+        # return reward - additional_penalty * 0.05 / len(self.stock_data.columns) * 5
+
 
     def _get_observation(self):
         obs_dict = OrderedDict()
