@@ -11,3 +11,4 @@ __pycache__
 /s4_reg
 /checkpoints
 /model
+/tests/prepared_data_all.pkl

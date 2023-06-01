@@ -28,7 +28,6 @@ class StockTradingEnv(gym.Env):
             f"T_{stock.replace('.', '_')}": spaces.Box(low=-np.inf, high=np.inf, shape=(n_features,), dtype=np.float32) for stock in stock_data.columns
         }
         space_dict["cash"] = spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32)
-        space_dict["avail_actions"] = spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.shares_amounts),), dtype=np.float32)
         space_dict["action_mask"] = spaces.Box(low=0, high=1, shape=(n_stocks, len(self.shares_amounts)), dtype=np.float32)
 
         self.observation_space = spaces.Dict(space_dict)
@@ -48,31 +47,35 @@ class StockTradingEnv(gym.Env):
         self.cash = self.initial_investment
         self.state = self._get_observation()
         
-        return self.state, {}
-
+        return self.state, {}    
+    
     def step(self, action):
         if self._is_done():
             return self._get_observation(), 0, True, {}
 
         info = {}
+        action_mask = self._get_action_mask()  # Generate action mask before taking actions
         for i, stock in enumerate(self.stock_data.columns):
             trade_action = self.shares_amounts[action[i]]
+            if action_mask[i, action[i]] == 0:  # Skip this action if it's not valid
+                print(f"{stock} : wrong_action selected !!!")
+                continue
             stock_price = self.stock_data.loc[self.current_step, stock]
-            cost = 0
-            sell_value = 0
-            if trade_action > 0 and self.positions[stock] < self.max_shares:  # Buy
-                shares_to_buy = min(trade_action, self.max_shares - self.positions[stock])
-                cost_judge = shares_to_buy * stock_price * (1 + self.transaction_fee_rate)
-                if cost_judge <= self.cash:
-                    self.positions[stock] += shares_to_buy
-                    self.cash -= cost_judge
-                    cost += cost_judge
+            
+            if trade_action > 0:  # Buy
+                shares_to_buy = trade_action
+                cost = shares_to_buy * stock_price * (1 + self.transaction_fee_rate)
+                self.positions[stock] += shares_to_buy
+                self.cash -= cost
+                info[stock] = {'cost': cost, 'sell_value': 0}
+
             elif trade_action < 0:  # Sell
-                shares_to_sell = min(abs(trade_action), self.positions[stock])
+                shares_to_sell = -trade_action
+                sell_value = shares_to_sell * stock_price * (1 - self.transaction_fee_rate)
+                transaction_fee = sell_value * self.transaction_fee_rate
                 self.positions[stock] -= shares_to_sell
-                sell_value += shares_to_sell * stock_price * (1 - self.transaction_fee_rate)
-                self.sell_history.append(sell_value)
-                self.cash += sell_value - cost
+                self.cash += sell_value - transaction_fee
+                info[stock] = {'cost': 0, 'sell_value': sell_value}
 
         self.current_step += 1
         self.state = self._get_observation()
@@ -80,9 +83,9 @@ class StockTradingEnv(gym.Env):
         reward = self._get_reward()
         done = self._is_done()
         truncated = False
-        info = {'current_step': self.current_step, 'positions': self.positions, 'cash': self.cash}
 
         return self.state, reward, done, truncated, info
+
 
     def _reset_data(self):
         return 0
@@ -117,21 +120,24 @@ class StockTradingEnv(gym.Env):
             obs_dict[obs_key] = obs_array
 
         obs_dict["cash"] = np.array([self.cash])
-        obs_dict["avail_actions"] = np.array([500, 300, 200, 100, 50, 10, 0, -10, -50, -100, -200, -300, -500])
         obs_dict["action_mask"] = self._get_action_mask()
         return obs_dict
 
     def _get_action_mask(self):
         action_mask = np.ones((len(self.stock_data.columns), len(self.shares_amounts)), dtype=np.float32)
         for j, stock in enumerate(self.stock_data.columns):
+            min_transaction_unit = 10 if stock == "1557.T" else (100 if stock.endswith(".T") else 10)
             for i, shares in enumerate(self.shares_amounts):
                 if shares > 0:  # Buying
-                    if self.cash < (self.min_shares * self.stock_data.loc[self.current_step, stock] * (1 + self.transaction_fee_rate)):
-                        action_mask[j, i] = 0  # Not enough cash to buy
+                    cost = shares * self.stock_data.loc[self.current_step, stock] * (1 + self.transaction_fee_rate)
+                    if self.cash < cost or shares < min_transaction_unit:
+                        action_mask[j, i] = 0  # Not enough cash to buy or buy less than the minimum transaction unit
                 elif shares < 0:  # Selling
-                    if self.positions[stock] < self.min_shares:
-                        action_mask[j, i] = 0  # Not enough shares to sell
+                    shares_to_sell = -shares
+                    if self.positions[stock] < shares_to_sell or shares_to_sell < min_transaction_unit:
+                        action_mask[j, i] = 0  # Not enough shares to sell or sell less than the minimum transaction unit
                 if self.positions[stock] + shares > self.max_shares:  # Buying more than max_shares
                     action_mask[j, i] = 0
-                        
+                            
         return action_mask
+
