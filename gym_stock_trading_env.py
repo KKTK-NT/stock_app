@@ -21,7 +21,7 @@ class StockTradingEnv(gym.Env):
         self.max_reward = 1.e6
         self.wrong_action_penalty = 0
         self.correct_action_bonus = 0
-        self.coeff_penalty = 1.00
+        self.coeff_penalty = 10.00
         self.coeff_bonus = 1.00
         self.coeff_reward = 0.001
         
@@ -112,10 +112,14 @@ class StockTradingEnv(gym.Env):
 
         if done:
             print("--- Information of episodes ---")
-            print("Wrong/Correct/Hold: {:.2f} {:.2f} {:.2f}".format(
-                np.mean(self.bonuses), 
+            # print("Wrong/Correct/Hold: {:.2f} {:.2f} {:.2f}".format(
+            #     np.mean(self.penalties), 
+            #     np.mean(self.bonuses), 
+            #     1 - np.mean(self.bonuses) - np.mean(self.penalties)
+            # ))
+            print("Wrong/Correct: {:.2f} {:.2f}".format(
                 np.mean(self.penalties), 
-                1 - np.mean(self.bonuses) - np.mean(self.penalties)
+                np.mean(self.bonuses),
             ))
             print("Average reward : {:.2f}".format(np.mean(self.rewards) / self.coeff_reward))
             print("Average increase percentage : {:.2f}".format(np.mean(self.increase_percentages)))
