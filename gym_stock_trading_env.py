@@ -18,17 +18,14 @@ class StockTradingEnv(gym.Env):
         self.transaction_fee_rate = 0.00055
         self.shares_amounts = [500, 300, 200, 100, 50, 10, 0, -10, -50, -100, -200, -300, -500]
         self.min_reward = -1.e6
-        self.max_reward = 1.e6
-        self.wrong_action_penalty = 0
-        self.correct_action_bonus = 0
+        self.max_reward = 4.e6
         self.coeff_penalty = 10.00
-        self.coeff_bonus = 1.00
+        self.coeff_bonus = 50.00
         self.coeff_reward = 0.001
         
         self.rewards = []
         self.penalties = []
         self.bonuses = []
-        self.increase_percentages = []
 
         n_features = len(next(iter(exogenous_data_dict.values())).columns) + 1
 
@@ -47,13 +44,10 @@ class StockTradingEnv(gym.Env):
         self.positions.clear()
         self.cash = self.initial_investment
         self.state = self._get_observation()
-        self.wrong_action_penalty = 0
-        self.correct_action_bonus = 0
         
         self.rewards = []
         self.penalties = []
         self.bonuses = []
-        self.increase_percentages = []
         
         return (self.state, {})
 
@@ -83,8 +77,6 @@ class StockTradingEnv(gym.Env):
         if self._is_done():
             return self._get_observation(), 0, True, {}, {}
         
-        self.wrong_action_penalty = 0
-        self.correct_action_bonus = 0
         info = {}
         for i, stock in enumerate(self.stock_data.columns):
             min_transaction_unit = 10 if stock == "1557.T" else (100 if stock.endswith(".T") else 10)
@@ -92,13 +84,11 @@ class StockTradingEnv(gym.Env):
             stock_price = self.stock_data.loc[self.current_step, stock]
             cost, sell_value, penalty, bonus = self._process_trade(stock, trade_action, stock_price, min_transaction_unit)
             info[stock] = {'cost': cost, 'sell_value': sell_value}
-            self.wrong_action_penalty += penalty
-            self.correct_action_bonus += bonus
 
         total_value = self._calculate_total_value()
         info['total_asset_value'] = total_value
-        Action_penalty = self.wrong_action_penalty * self.coeff_penalty / len(self.stock_data.columns)
-        Action_bonus = self.correct_action_bonus * self.coeff_bonus / len(self.stock_data.columns)
+        Action_penalty = penalty * self.coeff_penalty / len(self.stock_data.columns)
+        Action_bonus = bonus * self.coeff_bonus / len(self.stock_data.columns)
         self.current_step = self._next_step()
         reward = self._get_reward(Action_penalty, Action_bonus)
         done = self._is_done()
@@ -108,21 +98,16 @@ class StockTradingEnv(gym.Env):
         self.penalties.append(Action_penalty)
         self.bonuses.append(Action_bonus)
         increase_percentage = (info['total_asset_value'] - self.initial_investment) / self.initial_investment * 100
-        self.increase_percentages.append(increase_percentage)
 
         if done:
+            increase_percentage = (info['total_asset_value'] - self.initial_investment) / self.initial_investment * 100
             print("--- Information of episodes ---")
-            # print("Wrong/Correct/Hold: {:.2f} {:.2f} {:.2f}".format(
-            #     np.mean(self.penalties), 
-            #     np.mean(self.bonuses), 
-            #     1 - np.mean(self.bonuses) - np.mean(self.penalties)
-            # ))
             print("Wrong/Correct: {:.2f} {:.2f}".format(
                 np.mean(self.penalties), 
                 np.mean(self.bonuses),
             ))
             print("Average reward : {:.2f}".format(np.mean(self.rewards) / self.coeff_reward))
-            print("Average increase percentage : {:.2f}".format(np.mean(self.increase_percentages)))
+            print("Increase percentage : {:.2f}".format(increase_percentage))
             
         return self.state, reward, done, False, info
 
@@ -133,6 +118,7 @@ class StockTradingEnv(gym.Env):
         bonus = 0
 
         if trade_action == 0:  # Hold, do nothing
+            bonus += 0.5
             pass
 
         elif trade_action > 0:  # Buy
@@ -142,20 +128,19 @@ class StockTradingEnv(gym.Env):
                 self.positions[stock] += shares_to_buy
                 self.cash -= cost_judge
                 cost = cost_judge
-                bonus += 1
+                bonus += 1.0
             else:
-                penalty += 1
+                penalty += 1.0
 
         else:  # Sell
             shares_to_sell = -trade_action
             if self.positions[stock] >= shares_to_sell and shares_to_sell >= min_transaction_unit:  # Check if the agent has enough shares to sell and meets the minimum transaction unit
-                sell_value = shares_to_sell * stock_price * (1 - self.transaction_fee_rate)
-                transaction_fee = sell_value * self.transaction_fee_rate
                 self.positions[stock] -= shares_to_sell
-                self.cash += sell_value - transaction_fee
-                bonus += 1
+                sell_value = shares_to_sell * stock_price * (1 - self.transaction_fee_rate)
+                self.cash += sell_value
+                bonus += 1.0
             else:
-                penalty += 1
+                penalty += 1.0
 
         return cost, sell_value, penalty, bonus
 
@@ -174,3 +159,4 @@ class StockTradingEnv(gym.Env):
         reward = (reward - self.min_reward) / (self.max_reward - self.min_reward)
         reward = reward * 2 - 1
         return ( reward - (action_penalty - action_bonus)) * self.coeff_reward
+        # return ( 1 - (action_penalty - action_bonus)) * self.coeff_reward
